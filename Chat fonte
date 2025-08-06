@@ -295,12 +295,12 @@ local function CreateESP(player)
         RightFoot = Drawing.new("Line")
     }
 
-    for _, line in pairs(skeleton) do
-        line.Visible = false
-        line.Color = Settings.SkeletonColor
-        line.Thickness = Settings.SkeletonThickness
-        line.Transparency = Settings.SkeletonTransparency
-    end
+for _, line in pairs(skeleton) do
+    line.Visible = false
+    line.Color = Settings.SkeletonColor
+    line.Thickness = tonumber(Settings.SkeletonThickness) or 1
+    line.Transparency = tonumber(Settings.SkeletonTransparency) or 1
+end
 
     Drawings.Skeleton[player] = skeleton
 
@@ -1259,7 +1259,7 @@ RunService.RenderStepped:Connect(function()
         for _, player in ipairs(Players:GetPlayers()) do
             if player ~= LocalPlayer then
                 if not Drawings.ESP[player] then
-                    CreateESP(player)
+                    CreateESP(player, tonumber(Settings.SkeletonThickness) or 1, tonumber(Settings.SkeletonTransparency) or 1, Settings.SkeletonColor or Color3.new(1, 1, 1))
                 end
                 UpdateESP(player)
             end
@@ -1268,12 +1268,17 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
-Players.PlayerAdded:Connect(CreateESP)
+Players.PlayerAdded:Connect(function(player)
+    if player ~= LocalPlayer then
+        CreateESP(player, tonumber(Settings.SkeletonThickness) or 1, tonumber(Settings.SkeletonTransparency) or 1, Settings.SkeletonColor or Color3.new(1, 1, 1))
+    end
+end)
+
 Players.PlayerRemoving:Connect(RemoveESP)
 
 for _, player in ipairs(Players:GetPlayers()) do
     if player ~= LocalPlayer then
-        CreateESP(player)
+        CreateESP(player, tonumber(Settings.SkeletonThickness) or 1, tonumber(Settings.SkeletonTransparency) or 1, Settings.SkeletonColor or Color3.new(1, 1, 1))
     end
 end
 
