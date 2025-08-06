@@ -694,22 +694,21 @@ local function UpdateESP(player)
             end
 
             -- Update line with screen positions
-line.From = Vector2.new(fromScreen.X, fromScreen.Y)
-line.To = Vector2.new(toScreen.X, toScreen.Y)
-line.Color = Settings.SkeletonColor
-line.Thickness = tonumber(Settings.SkeletonThickness) or 1
-line.Transparency = tonumber(Settings.SkeletonTransparency) or 1
-line.Visible = true
+            line.From = Vector2.new(fromScreen.X, fromScreen.Y)
+            line.To = Vector2.new(toScreen.X, toScreen.Y)
+            line.Color = Settings.SkeletonColor
+            line.Thickness = Settings.SkeletonThickness
+            line.Transparency = Settings.SkeletonTransparency
+            line.Visible = true
+        end
 
-local bones = getBonePositions(character)
-if bones then
-    local skeleton = Drawings.Skeleton[player]
-    if skeleton then
-        -- Spine & Head
-        drawBone(bones.Head, bones.UpperTorso, skeleton.Head, tonumber(Settings.SkeletonThickness) or 1, tonumber(Settings.SkeletonTransparency) or 1, Settings.SkeletonColor)
-        drawBone(bones.UpperTorso, bones.LowerTorso, skeleton.UpperSpine, tonumber(Settings.SkeletonThickness) or 1, tonumber(Settings.SkeletonTransparency) or 1, Settings.SkeletonColor)
-    end
-end
+        local bones = getBonePositions(character)
+        if bones then
+            local skeleton = Drawings.Skeleton[player]
+            if skeleton then
+                -- Spine & Head
+                drawBone(bones.Head, bones.UpperTorso, skeleton.Head)
+                drawBone(bones.UpperTorso, bones.LowerTorso, skeleton.UpperSpine)
 
                 -- Left Arm Chain
                 drawBone(bones.UpperTorso, bones.LeftUpperArm, skeleton.LeftShoulder)
@@ -1235,14 +1234,13 @@ local SkeletonTransparency = SkeletonSection:AddSlider("SkeletonTransparency", {
     Max = 1,
     Rounding = 2
 })
-
 SkeletonTransparency:OnChanged(function(Value)
     Settings.SkeletonTransparency = Value
     for _, player in ipairs(Players:GetPlayers()) do
         local skeleton = Drawings.Skeleton[player]
         if skeleton then
             for _, line in pairs(skeleton) do
-                line.Transparency = tonumber(Value) or 1
+                line.Transparency = Value
             end
         end
     end
