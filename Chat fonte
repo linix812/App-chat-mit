@@ -297,27 +297,9 @@ local function UpdateESP(player)
     end
 
 
-
-    -- Early screen check to hide all drawings if player is off screen
-    local _, isOnScreen = Camera:WorldToViewportPoint(rootPart.Position)
-    if not isOnScreen then
-        for _, obj in pairs(esp.Box) do obj.Visible = false end
-        esp.Tracer.Visible = false
-        for _, obj in pairs(esp.HealthBar) do obj.Visible = false end
-        for _, obj in pairs(esp.Info) do obj.Visible = false end
-        esp.Snapline.Visible = false
-
-        local skeleton = Drawings.Skeleton[player]
-        if skeleton then
-            for _, line in pairs(skeleton) do
-                line.Visible = false
-            end
-        end
-        return
-    end
 local rootPart = character:FindFirstChild("HumanoidRootPart")
 if not rootPart then
-    -- Hide all drawings if rootPart doesn't exist
+    -- Oculta todos os desenhos se o rootPart não existir
     for _, obj in pairs(esp.Box) do
         obj.Visible = false
     end
@@ -332,6 +314,25 @@ if not rootPart then
         obj.Visible = false
     end
 
+    esp.Snapline.Visible = false
+
+    local skeleton = Drawings.Skeleton[player]
+    if skeleton then
+        for _, line in pairs(skeleton) do
+            line.Visible = false
+        end
+    end
+
+    return
+end
+
+-- Só executa essa parte se rootPart existir
+local _, isOnScreen = Camera:WorldToViewportPoint(rootPart.Position)
+if not isOnScreen then
+    for _, obj in pairs(esp.Box) do obj.Visible = false end
+    esp.Tracer.Visible = false
+    for _, obj in pairs(esp.HealthBar) do obj.Visible = false end
+    for _, obj in pairs(esp.Info) do obj.Visible = false end
     esp.Snapline.Visible = false
 
     local skeleton = Drawings.Skeleton[player]
@@ -1144,41 +1145,7 @@ do
     })
 end
 
-task.spawn(function()
-    while task.wait(0.1) do
-        Colors.Rainbow = Color3.fromHSV(tick() * Settings.RainbowSpeed % 1, 1, 1)
-    end
-end)
 
-local lastUpdate = 0
-RunService.RenderStepped:Connect(function()
-    if not Settings.Enabled then 
-        DisableESP()
-        return 
-    end
-
-    local currentTime = tick()
-    if currentTime - lastUpdate >= Settings.RefreshRate then
-        for _, player in ipairs(Players:GetPlayers()) do
-            if player ~= LocalPlayer then
-                if not Drawings.ESP[player] then
-                    CreateESP(player)
-                end
-                UpdateESP(player)
-            end
-        end
-        lastUpdate = currentTime
-    end
-end)
-
-Players.PlayerAdded:Connect(CreateESP)
-Players.PlayerRemoving:Connect(RemoveESP)
-
-for _, player in ipairs(Players:GetPlayers()) do
-    if player ~= LocalPlayer then
-        CreateESP(player)
-    end
-end
 
 Window:SelectTab(1)
 
@@ -1199,7 +1166,54 @@ SkeletonESPToggle:OnChanged(function()
 end)
 
 local SkeletonColor = SkeletonSection:AddColorpicker("SkeletonColor", {
-    Title = "Skeleton Color",
+    T-- Atualiza cor do arco-íris
+task.spawn(function()
+    while task.wait(0.1) do
+        Colors.Rainbow = Color3.fromHSV((tick() * Settings.RainbowSpeed) % 1, 1, 1)
+    end
+end)
+
+-- Variável de controle de atualização
+local lastUpdate = 0
+
+-- Loop de renderização
+RunService.RenderStepped:Connect(function()
+    if not Settings.Enabled then 
+        DisableESP()
+        return 
+    end
+
+    local currentTime = tick()
+    if currentTime - lastUpdate >= Settings.RefreshRate then
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer then
+                local character = player.Character
+                if character and character:FindFirstChild("HumanoidRootPart") then
+                    -- Só cria se não tiver
+                    if not Drawings.ESP[player] then
+                        CreateESP(player)
+                    end
+                    -- Atualiza apenas se existir root
+                    UpdateESP(player)
+                end
+            end
+        end
+        lastUpdate = currentTime
+    end
+end)
+
+-- Eventos de entrada e saída de jogadores
+Players.PlayerAdded:Connect(CreateESP)
+Players.PlayerRemoving:Connect(RemoveESP)
+
+-- Inicialização para jogadores já presentes
+for _, player in ipairs(Players:GetPlayers()) do
+    if player ~= LocalPlayer then
+        if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            CreateESP(player)
+        end
+    end
+enfeite = "Skeleton Color",
     Default = Settings.SkeletonColor
 })
 SkeletonColor:OnChanged(function(Value)
@@ -1208,7 +1222,9 @@ SkeletonColor:OnChanged(function(Value)
         local skeleton = Drawings.Skeleton[player]
         if skeleton then
             for _, line in pairs(skeleton) do
-                line.Color = Value
+                if typeof(line) == "table" and line.Color then
+                    line.Color = Value
+                end
             end
         end
     end
@@ -1222,12 +1238,17 @@ local SkeletonThickness = SkeletonSection:AddSlider("SkeletonThickness", {
     Rounding = 1
 })
 SkeletonThickness:OnChanged(function(Value)
-    Settings.SkeletonThickness = Value
-    for _, player in ipairs(Players:GetPlayers()) do
-        local skeleton = Drawings.Skeleton[player]
-        if skeleton then
-            for _, line in pairs(skeleton) do
-                line.Thickness = Value
+    local num = tonumber(Value)
+    if num then
+        Settings.SkeletonThickness = num
+        for _, player in ipairs(Players:GetPlayers()) do
+            local skeleton = Drawings.Skeleton[player]
+            if skeleton then
+                for _, line in pairs(skeleton) do
+                    if typeof(line) == "table" and line.Thickness then
+                        line.Thickness = num
+                    end
+                end
             end
         end
     end
@@ -1241,12 +1262,17 @@ local SkeletonTransparency = SkeletonSection:AddSlider("SkeletonTransparency", {
     Rounding = 2
 })
 SkeletonTransparency:OnChanged(function(Value)
-    Settings.SkeletonTransparency = Value
-    for _, player in ipairs(Players:GetPlayers()) do
-        local skeleton = Drawings.Skeleton[player]
-        if skeleton then
-            for _, line in pairs(skeleton) do
-                line.Transparency = Value
+    local num = tonumber(Value)
+    if num then
+        Settings.SkeletonTransparency = num
+        for _, player in ipairs(Players:GetPlayers()) do
+            local skeleton = Drawings.Skeleton[player]
+            if skeleton then
+                for _, line in pairs(skeleton) do
+                    if typeof(line) == "table" and line.Transparency then
+                        line.Transparency = num
+                    end
+                end
             end
         end
     end
