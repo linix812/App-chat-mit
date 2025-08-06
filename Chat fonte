@@ -296,23 +296,7 @@ local function UpdateESP(player)
         return 
     end
 
-    local rootPart = character:FindFirstChild("HumanoidRootPart")
-    if not rootPart then 
-        -- Hide all drawings if rootPart doesn't exist
-        for _, obj in pairs(esp.Box) do obj.Visible = false end
-        esp.Tracer.Visible = false
-        for _, obj in pairs(esp.HealthBar) do obj.Visible = false end
-        for _, obj in pairs(esp.Info) do obj.Visible = false end
-        esp.Snapline.Visible = false
 
-        local skeleton = Drawings.Skeleton[player]
-        if skeleton then
-            for _, line in pairs(skeleton) do
-                line.Visible = false
-            end
-        end
-        return 
-    end
 
     -- Early screen check to hide all drawings if player is off screen
     local _, isOnScreen = Camera:WorldToViewportPoint(rootPart.Position)
@@ -331,7 +315,34 @@ local function UpdateESP(player)
         end
         return
     end
+local rootPart = character:FindFirstChild("HumanoidRootPart")
+if not rootPart then
+    -- Hide all drawings if rootPart doesn't exist
+    for _, obj in pairs(esp.Box) do
+        obj.Visible = false
+    end
 
+    esp.Tracer.Visible = false
+
+    for _, obj in pairs(esp.HealthBar) do
+        obj.Visible = false
+    end
+
+    for _, obj in pairs(esp.Info) do
+        obj.Visible = false
+    end
+
+    esp.Snapline.Visible = false
+
+    local skeleton = Drawings.Skeleton[player]
+    if skeleton then
+        for _, line in pairs(skeleton) do
+            line.Visible = false
+        end
+    end
+
+    return
+end
     local humanoid = character:FindFirstChild("Humanoid")
     if not humanoid or humanoid.Health <= 0 then
         for _, obj in pairs(esp.Box) do obj.Visible = false end
