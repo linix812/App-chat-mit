@@ -1,111 +1,3 @@
---[[ how esp works:
-
-    layout:
-    ┌─────────┐  
-    │  Name   │  <- name/info
-    │ [100HP] │  <- health text
-    ├──┐  ┌──┤  <- box corners
-    │  │  │  │
-    │  └──┘  │
-    ║   │    │  <- health bar (left/right)
-    └───║────┘
-        ║      <- tracer line
-        ▼    
-    [origin]   <- bottom/mouse/center/top
-
-    box types:
-    corners:       full:         3d:
-    ┌─┐  ┌─┐      ┌──────┐      ┌──────┐╗
-    │ │  │ │      │      │      │      │║
-    │ │  │ │      │      │      │      │║
-    └─┘  └─┘      └──────┘      └──────┘║
-                                 ╚═══════╝
-
-    esp creation process:
-    Player -> Character -> HumanoidRootPart
-         │
-         ├─> Box ESP (3 styles)
-         │   ├─> Corner: 8 lines for corners
-         │   ├─> Full: 4 lines for box
-         │   └─> 3D: 12 lines + connectors
-         │
-         ├─> Skeleton ESP
-         │   ├─> Joint Connections
-         │   │   ├─> Head -> Torso
-         │   │   ├─> Torso -> Arms
-         │   │   ├─> Torso -> Legs
-         │   │   └─> Arms/Legs Segments
-         │   ├─> Dynamic Updates
-         │   └─> Color + Thickness
-         │
-         ├─> Chams
-         │   ├─> Character Highlight
-         │   ├─> Fill Color + Transparency
-         │   ├─> Outline Color + Thickness
-         │   └─> Occluded Color (through walls)
-         │
-         ├─> Tracer
-         │   └─> line from origin (4 positions)
-         │
-         ├─> Health Bar
-         │   ├─> outline (background)
-         │   ├─> fill (dynamic color)
-         │   └─> text (HP/percentage)
-         │
-         └─> Info
-             └─> name text
-
-    technical implementation:
-    ┌─ Camera Calculations ─────────────────┐
-    │ 1. Get Character CFrame & Size        │
-    │ 2. WorldToViewportPoint for corners   │
-    │ 3. Convert 3D -> 2D positions         │
-    │ 4. Check if on screen                 │
-    │ 5. Calculate screen dimensions        │
-    └─────────────────────────────────────┘
-
-    ┌─ Drawing Creation ──────────────────┐
-    │ Line:   From/To positions           │
-    │ Square: Position + Size             │
-    │ Text:   Position + String           │
-    │ All:    Color/Transparency/Visible  │
-    └────────────────────────────────────┘
-
-    ┌─ Math & Checks ───────────────────────┐
-    │ Distance = (Player - Camera).Magnitude │
-    │ OnScreen = Z > 0 && in ViewportSize   │
-    │ BoxSize = WorldToScreen(Extents)      │
-    │ Scaling = 1000/Position.Z            │
-    └─────────────────────────────────────┘
-
-    effects:
-    ┌─ Rainbow Options ─┐
-    │ - All            │
-    │ - Box Only       │
-    │ - Tracers Only   │
-    │ - Text Only      │
-    └──────────────────┘
-
-    colors:
-    ┌─ Team Colors ────┐  ┌─ Health Colors ─┐
-    │ Enemy: Red       │  │ Full: Green     │
-    │ Ally: Green     │  │ Low: Red        │
-    │ Rainbow: HSV    │  │ Mid: Yellow     │
-    └────────────────┘  └────────────────┘
-
-    performance:
-    ┌─ Settings ───────┐
-    │ Refresh: 144fps  │
-    │ Distance: 5000   │
-    │ Cleanup: Auto    │
-    └──────────────────┘
-
-    update cycle:
-    RenderStepped -> Check Settings -> Get Positions -> Update Drawings
-         │                                                    │
-         └────────────────── 144fps ─────────────────────────┘
-]]
-
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
 local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
 local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
@@ -802,21 +694,22 @@ local function UpdateESP(player)
             end
 
             -- Update line with screen positions
-            line.From = Vector2.new(fromScreen.X, fromScreen.Y)
-            line.To = Vector2.new(toScreen.X, toScreen.Y)
-            line.Color = Settings.SkeletonColor
-            line.Thickness = Settings.SkeletonThickness
-            line.Transparency = Settings.SkeletonTransparency
-            line.Visible = true
-        end
+line.From = Vector2.new(fromScreen.X, fromScreen.Y)
+line.To = Vector2.new(toScreen.X, toScreen.Y)
+line.Color = Settings.SkeletonColor
+line.Thickness = tonumber(Settings.SkeletonThickness) or 1
+line.Transparency = tonumber(Settings.SkeletonTransparency) or 1
+line.Visible = true
 
-        local bones = getBonePositions(character)
-        if bones then
-            local skeleton = Drawings.Skeleton[player]
-            if skeleton then
-                -- Spine & Head
-                drawBone(bones.Head, bones.UpperTorso, skeleton.Head)
-                drawBone(bones.UpperTorso, bones.LowerTorso, skeleton.UpperSpine)
+local bones = getBonePositions(character)
+if bones then
+    local skeleton = Drawings.Skeleton[player]
+    if skeleton then
+        -- Spine & Head
+        drawBone(bones.Head, bones.UpperTorso, skeleton.Head, tonumber(Settings.SkeletonThickness) or 1, tonumber(Settings.SkeletonTransparency) or 1, Settings.SkeletonColor)
+        drawBone(bones.UpperTorso, bones.LowerTorso, skeleton.UpperSpine, tonumber(Settings.SkeletonThickness) or 1, tonumber(Settings.SkeletonTransparency) or 1, Settings.SkeletonColor)
+    end
+end
 
                 -- Left Arm Chain
                 drawBone(bones.UpperTorso, bones.LeftUpperArm, skeleton.LeftShoulder)
@@ -1342,13 +1235,14 @@ local SkeletonTransparency = SkeletonSection:AddSlider("SkeletonTransparency", {
     Max = 1,
     Rounding = 2
 })
+
 SkeletonTransparency:OnChanged(function(Value)
     Settings.SkeletonTransparency = Value
     for _, player in ipairs(Players:GetPlayers()) do
         local skeleton = Drawings.Skeleton[player]
         if skeleton then
             for _, line in pairs(skeleton) do
-                line.Transparency = Value
+                line.Transparency = tonumber(Value) or 1
             end
         end
     end
