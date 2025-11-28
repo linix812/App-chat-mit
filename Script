@@ -1,0 +1,2189 @@
+-- HEX V2 - ADVANCED EDITION | Mobile & PC Optimized (Final Refinement - Aimbot UI Only)
+-- Melhorias desta versão:
+-- - INTEGRAÇÃO COMPLETA: Código fornecido (variáveis, trident, fakecrouch, longneck, freecam, carfly) integrado.
+-- - ESP Box: Puramente visual (Drawing.Square 2D), sem textos. Escala dinâmica e limites mantidos.
+-- - Player Info Tags: Sistema 3D (BillboardGui) para Nome, Health, Distância, Arma.
+-- - Chams: Lógica de chams aprimorada, integrada do código fornecido.
+-- - Skeleton: Corrigido para funcionar consistentemente em R6 e R15, com lógica aprimorada.
+-- - UI: Removidas referências a binds de teclado para mobile-first.
+-- - Aimbot: Controle de ativação/desativação APENAS VIA TOGGLE NA UI. Removido o botão invisível de toque.
+-- - Robustez: Mais checagens de nil, pcall e otimizações de loops.
+
+-- ============================================================================
+-- GLOBAL UTILS & ROBlox SERVICES (INTEGRATED FROM PROVIDED CODE)
+-- ============================================================================
+
+local _CFramenew = CFrame.new
+local _Vector2new = Vector2.new
+local _Vector3new = Vector3.new
+local _IsDescendantOf = game.IsDescendantOf
+local _FindFirstChild = game.FindFirstChild
+local _FindFirstChildOfClass = game.FindFirstChildOfClass
+local _Raycast = workspace.Raycast
+local _IsKeyDown = UserInputService.IsKeyDown
+local _WorldToViewportPoint = Camera.WorldToViewportPoint
+local _Vector3zeromin = Vector3.zero.Min
+local _Vector2zeromin = Vector2.zero.Min
+local _Vector3zeromax = Vector3.zero.Max
+local _Vector2zeromax = Vector2.zero.Max
+local _IsA = game.IsA
+local tablecreate = table.create
+local mathfloor = math.floor
+local mathround = math.round
+local mathclamp = math.clamp
+local tostring = tostring
+local unpack = unpack
+local getupvalues = debug.getupvalues
+local getupvalue = debug.getupvalue
+local setupvalue = debug.setupvalue
+local getconstants = debug.getconstants
+local getconstant = debug.getconstant
+local setconstant = debug.setconstant
+local getstack = debug.getstack
+local setstack = debug.setstack
+local getinfo = debug.getinfo
+local rawget = rawget
+
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+-- ============================================================================
+-- CONFIG & SERVICES
+-- ============================================================================
+
+local Window = Rayfield:CreateWindow({
+    Name = "HEX V2 Advanced",
+    LoadingTitle = "HEX V2 - Carregando...",
+    LoadingSubtitle = "Advanced ESP & Mobile Edition",
+    ConfigurationSaving = {Enabled = true, FolderName = "HEX_V2", FileName = "Config"},
+    KeySystem = false
+})
+
+local Services = {
+    Players = game:GetService("Players"),
+    Workspace = game:GetService("Workspace"),
+    RunService = game:GetService("RunService"),
+    UserInputService = game:GetService("UserInputService"),
+    Lighting = game:GetService("Lighting"),
+    CoreGui = game:GetService("CoreGui"),
+    ReplicatedStorage = game:GetService("ReplicatedStorage")
+}
+
+local LocalPlayer = Services.Players.LocalPlayer
+local Camera = Services.Workspace.CurrentCamera
+
+local IsMobile = Services.UserInputService.TouchEnabled and not Services.UserInputService.KeyboardEnabled
+
+local ESPContainer = Instance.new("Folder")
+ESPContainer.Name = "HEX_ESPContainer"
+ESPContainer.Parent = Services.CoreGui
+
+-- ============================================================================
+-- TRIDENT OBJECT (INTEGRATED FROM PROVIDED CODE)
+-- ============================================================================
+
+local trident = {
+    loaded = false,
+    lastpos = nil,
+    middlepart = nil,
+    tcp = nil,
+    original_model = nil
+}
+
+repeat task.wait(0.1) until pcall(function()
+    trident.middlepart = Services.Workspace.Const.Ignore.LocalCharacter.Middle
+    trident.original_model = Services.ReplicatedStorage.Shared.entities.Player.Model
+    trident.tcp = LocalPlayer.TCP
+    trident.loaded = true
+end)
+
+-- ============================================================================
+-- STATE
+-- ============================================================================
+
+local State = {
+    ESPData = {},
+    WorldObjects = {},
+    PlayerTags3D = {},
+    ArmorTags = {},
+    OriginalValues = {},
+    Connections = {}
+}
+
+-- ============================================================================
+-- UTILS
+-- ============================================================================
+
+local Utils = {}
+
+function Utils.WorldToScreen(pos)
+    local vec, onScreen = _WorldToViewportPoint(Camera, pos)
+    return _Vector2new(vec.X, vec.Y), onScreen, vec.Z
+end
+
+function Utils.GetDistance(a, b)
+    return (a - b).Magnitude
+end
+
+function Utils.IsAlive(character)
+    if not character or not character.Parent then return false end
+    local humanoid = _FindFirstChildOfClass(character, "Humanoid")
+    return humanoid and humanoid.Health > 0
+end
+
+function Utils.IsSleeping(model)
+    local success, result = pcall(function()
+        local hrp = _FindFirstChild(model, "HumanoidRootPart")
+        if not hrp then return false end
+        
+        local const = _FindFirstChild(Services.Workspace, "Const")
+        if not const then return false end
+        
+        local ignore = _FindFirstChild(const, "Ignore")
+        if not ignore then return false end
+        
+        local localChar = _FindFirstChild(ignore, "LocalCharacter")
+        if not localChar then return false end
+        
+        local bottom = _FindFirstChild(localChar, "Bottom")
+        if not bottom then return false end
+        
+        local prismatic = _FindFirstChildOfClass(bottom, "PrismaticConstraint")
+        return prismatic and prismatic.Distance < 1
+    end)
+    return success and result or false
+end
+
+function Utils.CreateDrawing(t, props)
+    local d = Drawing.new(t)
+    d.Visible = false
+    d.__type = "Drawing"
+    if props then
+        for k, v in pairs(props) do
+            pcall(function()
+                d[k] = v
+            end)
+        end
+    end
+    return d
+end
+
+function Utils.SafeDestroy(obj)
+    if not obj then return end
+    pcall(function()
+        if typeof(obj) == "Instance" then
+            obj:Destroy()
+        elseif type(obj) == "table" and obj.Remove then
+            obj:Remove()
+        elseif type(obj) == "table" and obj.Destroy then
+            obj:Destroy()
+        end
+    end)
+end
+
+local function GetScreenCenter()
+    local vp = Camera.ViewportSize
+    return _Vector2new(vp.X/2, vp.Y/2)
+end
+
+-- Detectar se é R15 ou R6
+function Utils.GetRigType(character)
+    local humanoid = _FindFirstChildOfClass(character, "Humanoid")
+    if not humanoid then return "Unknown" end
+    return humanoid.RigType == Enum.HumanoidRigType.R15 and "R15" or "R6"
+end
+
+-- ============================================================================
+-- AIM SYSTEM (TOC / PC+MOBILE)
+-- ============================================================================
+
+local AimSystem = {
+    Enabled = false,
+    ShowFOV = false,
+    FOVSize = 120,
+    FOVColor = Color3.fromRGB(255, 0, 0),
+    ShowSnapline = false,
+    CheckSleep = true,
+    FOVCircle = nil,
+    SnapLine = nil,
+    CurrentTarget = nil
+}
+
+function AimSystem:Initialize()
+    self.FOVCircle = Utils.CreateDrawing("Circle", {
+        Thickness = 2,
+        NumSides = 60,
+        Filled = false,
+        Color = self.FOVColor
+    })
+    self.SnapLine = Utils.CreateDrawing("Line", {
+        Thickness = 2,
+        Color = Color3.new(1, 1, 1)
+    })
+end
+
+function AimSystem:GetClosestTarget()
+    if not self.Enabled then return nil end
+    
+    local centerPos = GetScreenCenter()
+    local closest, minDist = nil, math.huge
+    
+    for _, plr in ipairs(Services.Players:GetPlayers()) do
+        if plr == LocalPlayer then continue end
+        local char = plr.Character
+        if not Utils.IsAlive(char) then continue end
+        if self.CheckSleep and Utils.IsSleeping(char) then continue end
+        
+        local head = _FindFirstChild(char, "Head")
+        if not head then continue end
+        
+        local screen, onScreen = Utils.WorldToScreen(head.Position)
+        if not onScreen then continue end
+        
+        local dist = (screen - centerPos).Magnitude
+        if dist < minDist and dist <= self.FOVSize then
+            minDist = dist
+            closest = {Player = plr, Position = screen, Head = head}
+        end
+    end
+    
+    return closest
+end
+
+function AimSystem:Update()
+    if not self.Enabled then
+        self.FOVCircle.Visible = false
+        self.SnapLine.Visible = false
+        self.CurrentTarget = nil
+        return
+    end
+    
+    local center = GetScreenCenter()
+    
+    self.FOVCircle.Position = center
+    self.FOVCircle.Radius = self.FOVSize
+    self.FOVCircle.Color = self.FOVColor
+    self.FOVCircle.Visible = self.ShowFOV
+    
+    local target = self:GetClosestTarget()
+    self.CurrentTarget = target
+    
+    if self.ShowSnapline and target then
+        self.SnapLine.From = center
+        self.SnapLine.To = target.Position
+        self.SnapLine.Visible = true
+    else
+        self.SnapLine.Visible = false
+    end
+end
+
+-- ============================================================================
+-- HITBOX (RITBOX)
+-- ============================================================================
+
+local HitboxSystem = {
+    Enabled = false,
+    HeadEnabled = true,
+    TorsoEnabled = false,
+    HeadSize = _Vector3new(3, 4, 3),
+    TorsoSize = _Vector3new(4, 4, 4),
+    Transparency = 0.5,
+    CanCollide = false
+}
+
+function HitboxSystem:SaveOriginal(part)
+    if not State.OriginalValues[part] then
+        local d = {
+            Size = part.Size,
+            Transparency = part.Transparency,
+            CanCollide = part.CanCollide
+        }
+        local constraint = _FindFirstChildOfClass(part, "PrismaticConstraint")
+        if constraint then
+            d.Constraint = {
+                LimitsEnabled = constraint.LimitsEnabled,
+                LowerLimit = constraint.LowerLimit,
+                UpperLimit = constraint.UpperLimit
+            }
+        end
+        State.OriginalValues[part] = d
+    end
+end
+
+function HitboxSystem:ModifyPart(part, size)
+    self:SaveOriginal(part)
+    part.Size = size
+    part.Transparency = self.Transparency
+    part.CanCollide = self.CanCollide
+    
+    local constraint = _FindFirstChildOfClass(part, "PrismaticConstraint")
+    if constraint then
+        local half = size.X/2
+        constraint.LimitsEnabled = true
+        constraint.LowerLimit = -half
+        constraint.UpperLimit = half
+    end
+end
+
+function HitboxSystem:ApplyToPlayer(player)
+    if not self.Enabled then return end
+    if player == LocalPlayer then return end
+    
+    local char = player.Character
+    if not Utils.IsAlive(char) then return end
+    
+    if self.HeadEnabled then
+        local head = _FindFirstChild(char, "Head")
+        if head then
+            self:ModifyPart(head, self.HeadSize)
+        end
+    end
+    if self.TorsoEnabled then
+        local torso = _FindFirstChild(char, "Torso") or _FindFirstChild(char, "UpperTorso")
+        if torso then
+            self:ModifyPart(torso, self.TorsoSize)
+        end
+    end
+end
+
+function HitboxSystem:Reset()
+    for part, v in pairs(State.OriginalValues) do
+        if part and part.Parent then
+            pcall(function()
+                part.Size = v.Size
+                part.Transparency = v.Transparency
+                part.CanCollide = v.CanCollide
+                if v.Constraint then
+                    local c = _FindFirstChildOfClass(part, "PrismaticConstraint")
+                    if c then
+                        c.LimitsEnabled = v.Constraint.LimitsEnabled
+                        c.LowerLimit = v.Constraint.LowerLimit
+                        c.UpperLimit = v.Constraint.UpperLimit
+                    end
+                end
+            end)
+        end
+    end
+    State.OriginalValues = {}
+end
+
+function HitboxSystem:UpdateAll()
+    if self.Enabled then
+        for _, plr in ipairs(Services.Players:GetPlayers()) do
+            self:ApplyToPlayer(plr)
+        end
+    else
+        self:Reset()
+    end
+end
+
+-- ============================================================================
+-- PLAYER TAGS 3D (BillboardGui)
+-- ============================================================================
+
+local PlayerTags3D = {
+    Enabled = true,
+    ShowName = true,
+    ShowDistance = true,
+    ShowWeapon = true,
+    ShowHealth = true,
+
+    NameColor = Color3.fromRGB(255, 255, 255),
+    DistanceColor = Color3.fromRGB(0, 255, 0),
+    WeaponColor = Color3.fromRGB(255, 255, 0),
+    HealthColor = Color3.fromRGB(0, 255, 0),
+
+    MaxDistance = 1500
+}
+
+function PlayerTags3D:CreateTagGUI(character)
+    if State.PlayerTags3D[character] then return end
+
+    local player = Services.Players:GetPlayerFromCharacter(character)
+    if not player then return end
+
+    local hrp = _FindFirstChild(character, "HumanoidRootPart")
+    if not hrp then return end
+
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = "PlayerTag3D_" .. player.Name
+    billboard.Size = UDim2.new(0, 200, 0, 100)
+    billboard.StudsOffset = _Vector3new(0, 3, 0)
+    billboard.AlwaysOnTop = true
+    billboard.LightInfluence = 0
+    billboard.Adornee = hrp
+    billboard.Parent = ESPContainer
+
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, 0, 1, 0)
+    frame.BackgroundTransparency = 1
+    frame.Parent = billboard
+
+    local layout = Instance.new("UIListLayout")
+    layout.FillDirection = Enum.FillDirection.Vertical
+    layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    layout.VerticalAlignment = Enum.VerticalAlignment.Top
+    layout.Padding = UDim.new(0, 2)
+    layout.Parent = frame
+
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Name = "NameLabel"
+    nameLabel.Size = UDim2.new(1, 0, 0, 18)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Text = player.Name
+    nameLabel.TextColor3 = self.NameColor
+    nameLabel.TextStrokeTransparency = 0
+    nameLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
+    nameLabel.TextSize = 16
+    nameLabel.Font = Enum.Font.GothamBold
+    nameLabel.Parent = frame
+
+    local healthLabel = Instance.new("TextLabel")
+    healthLabel.Name = "HealthLabel"
+    healthLabel.Size = UDim2.new(1, 0, 0, 16)
+    healthLabel.BackgroundTransparency = 1
+    healthLabel.Text = "100%"
+    healthLabel.TextColor3 = self.HealthColor
+    healthLabel.TextStrokeTransparency = 0
+    healthLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
+    healthLabel.TextSize = 14
+    healthLabel.Font = Enum.Font.GothamBold
+    healthLabel.Parent = frame
+
+    local distanceLabel = Instance.new("TextLabel")
+    distanceLabel.Name = "DistanceLabel"
+    distanceLabel.Size = UDim2.new(1, 0, 0, 16)
+    distanceLabel.BackgroundTransparency = 1
+    distanceLabel.Text = "0m"
+    distanceLabel.TextColor3 = self.DistanceColor
+    distanceLabel.TextStrokeTransparency = 0
+    distanceLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
+    distanceLabel.TextSize = 14
+    distanceLabel.Font = Enum.Font.GothamBold
+    distanceLabel.Parent = frame
+
+    local weaponLabel = Instance.new("TextLabel")
+    weaponLabel.Name = "WeaponLabel"
+    weaponLabel.Size = UDim2.new(1, 0, 0, 16)
+    weaponLabel.BackgroundTransparency = 1
+    weaponLabel.Text = "Unarmed"
+    weaponLabel.TextColor3 = self.WeaponColor
+    weaponLabel.TextStrokeTransparency = 0
+    weaponLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
+    weaponLabel.TextSize = 14
+    weaponLabel.Font = Enum.Font.GothamBold
+    weaponLabel.Parent = frame
+
+    State.PlayerTags3D[character] = {
+        Billboard = billboard,
+        NameLabel = nameLabel,
+        HealthLabel = healthLabel,
+        DistanceLabel = distanceLabel,
+        WeaponLabel = weaponLabel
+    }
+end
+
+function PlayerTags3D:RemoveTagGUI(character)
+    local data = State.PlayerTags3D[character]
+    if data then
+        Utils.SafeDestroy(data.Billboard)
+        State.PlayerTags3D[character] = nil
+    end
+end
+
+function PlayerTags3D:UpdateTagGUI(character, data)
+    local player = Services.Players:GetPlayerFromCharacter(character)
+    local hrp = _FindFirstChild(character, "HumanoidRootPart")
+    local humanoid = _FindFirstChildOfClass(character, "Humanoid")
+
+    if not player or not hrp or not humanoid or not Utils.IsAlive(character) then
+        data.Billboard.Enabled = false
+        return
+    end
+
+    local currentDistance = 0
+    if LocalPlayer.Character and _FindFirstChild(LocalPlayer.Character, "HumanoidRootPart") then
+        currentDistance = Utils.GetDistance(_FindFirstChild(LocalPlayer.Character, "HumanoidRootPart").Position, hrp.Position)
+        if currentDistance > self.MaxDistance then
+            data.Billboard.Enabled = false
+            return
+        end
+    end
+
+    data.Billboard.Enabled = self.Enabled
+
+    if self.ShowName then
+        data.NameLabel.Text = player.Name
+        data.NameLabel.Visible = true
+    else
+        data.NameLabel.Visible = false
+    end
+
+    if self.ShowHealth and humanoid.MaxHealth > 0 then
+        local hp = mathfloor((humanoid.Health / humanoid.MaxHealth) * 100)
+        data.HealthLabel.Text = hp .. "%"
+        data.HealthLabel.Visible = true
+    else
+        data.HealthLabel.Visible = false
+    end
+
+    if self.ShowDistance then
+        data.DistanceLabel.Text = mathfloor(currentDistance) .. "m"
+        data.DistanceLabel.Visible = true
+    else
+        data.DistanceLabel.Visible = false
+    end
+
+    if self.ShowWeapon then
+        local tool = _FindFirstChildOfClass(character, "Tool")
+        data.WeaponLabel.Text = tool and tool.Name or "Unarmed"
+        data.WeaponLabel.Visible = true
+    else
+        data.WeaponLabel.Visible = false
+    end
+    
+    local scaleFactor = mathclamp(1 - (currentDistance / self.MaxDistance), 0.3, 1)
+    data.Billboard.Size = UDim2.new(0, 200 * scaleFactor, 0, 100 * scaleFactor)
+    data.Billboard.StudsOffset = _Vector3new(0, 3 + (humanoid.HipHeight or 0) + (character.Head.Size.Y/2), 0)
+end
+
+function PlayerTags3D:UpdateAll()
+    if not self.Enabled then
+        for _, data in pairs(State.PlayerTags3D) do
+            data.Billboard.Enabled = false
+        end
+        return
+    end
+
+    for character, data in pairs(State.PlayerTags3D) do
+        if character and character.Parent then
+            self:UpdateTagGUI(character, data)
+        else
+            self:RemoveTagGUI(character)
+        end
+    end
+end
+
+-- ============================================================================
+-- ESP SYSTEM (CAIXA + SKELETON + TRACERS + CHAMS - PURAMENTE VISUAL)
+-- ============================================================================
+
+local ESPSystem = {
+    Enabled = true,
+    ShowBox = true,
+    ShowBoxFill = true,
+    ShowSkeleton = true,
+    ShowTracers = true,
+    ShowChams = true,
+    
+    BoxColor = Color3.fromRGB(255, 0, 0),
+    BoxFillColor = Color3.fromRGB(255, 0, 0),
+    BoxFillTransparency = 0.7,
+    SkeletonColor = Color3.fromRGB(0, 255, 255),
+    TracerColor = Color3.fromRGB(255, 0, 255),
+    ChamsColor = Color3.fromRGB(0, 100, 255),
+    ChamsTransparency = 0.5,
+    
+    MaxDistance = 1500,
+    
+    MinBoxHeight = 40,
+    MaxBoxHeight = 280,
+    BaseBoxHeight = 100,
+    DistanceScaleFactor = 0.05,
+
+    -- Chams settings from provided code
+    ChamsVisibleOnly = false, -- Default to false
+    ChamsOutlineTransparency = 0 -- Default to 0
+}
+
+local SkeletonBones_R15 = {
+    {"LeftFoot", "LeftLowerLeg"},
+    {"LeftLowerLeg", "LeftUpperLeg"},
+    {"LeftUpperLeg", "LowerTorso"},
+    {"RightFoot", "RightLowerLeg"},
+    {"RightLowerLeg", "RightUpperLeg"},
+    {"RightUpperLeg", "LowerTorso"},
+    {"LeftHand", "LeftLowerArm"},
+    {"LeftLowerArm", "LeftUpperArm"},
+    {"LeftUpperArm", "UpperTorso"},
+    {"RightHand", "RightLowerArm"},
+    {"RightLowerArm", "RightUpperArm"},
+    {"RightUpperArm", "UpperTorso"},
+    {"LowerTorso", "UpperTorso"},
+    {"UpperTorso", "Head"}
+}
+
+local SkeletonBones_R6 = {
+    {"Left Arm", "Torso"},
+    {"Right Arm", "Torso"},
+    {"Left Leg", "Torso"},
+    {"Right Leg", "Torso"},
+    {"Torso", "Head"}
+}
+
+local function GetSkeletonBones(character)
+    local rig = Utils.GetRigType(character)
+    if rig == "R15" then
+        return SkeletonBones_R15
+    else
+        return SkeletonBones_R6
+    end
+end
+
+function ESPSystem:CreateESP(character)
+    if State.ESPData[character] then return end
+    
+    local data = {
+        Character = character,
+        Box = Utils.CreateDrawing("Square", {Thickness = 1}),
+        BoxOutline = Utils.CreateDrawing("Square", {Thickness = 3, Color = Color3.new(0, 0, 0)}),
+        BoxFill = Utils.CreateDrawing("Square", {Filled = true}),
+        Tracer = Utils.CreateDrawing("Line", {Thickness = 1}),
+        Skeleton = {},
+        Chams = Instance.new("Highlight"),
+        RigType = Utils.GetRigType(character)
+    }
+    
+    data.Chams.Adornee = character
+    data.Chams.FillColor = self.ChamsColor
+    data.Chams.FillTransparency = self.ChamsTransparency
+    data.Chams.OutlineColor = self.ChamsColor
+    data.Chams.OutlineTransparency = self.ChamsOutlineTransparency -- From provided code
+    data.Chams.DepthMode = self.ChamsVisibleOnly and Enum.HighlightDepthMode.Occluded or Enum.HighlightDepthMode.AlwaysOnTop -- From provided code
+    data.Chams.Enabled = false
+    data.Chams.Parent = ESPContainer
+    
+    local bonesTemplate = GetSkeletonBones(character)
+    for _, bone in ipairs(bonesTemplate) do
+        table.insert(data.Skeleton, {
+            From = bone[1],
+            To = bone[2],
+            Line = Utils.CreateDrawing("Line", {Thickness = 1})
+        })
+    end
+    
+    State.ESPData[character] = data
+end
+
+function ESPSystem:RemoveESP(character)
+    local data = State.ESPData[character]
+    if not data then return end
+    
+    for key, value in pairs(data) do
+        if key == "Skeleton" then
+            for _, bone in ipairs(value) do
+                Utils.SafeDestroy(bone.Line)
+            end
+        elseif key == "Chams" then
+            Utils.SafeDestroy(value)
+        elseif type(value) == "table" and value.__type == "Drawing" then
+            Utils.SafeDestroy(value)
+        end
+    end
+    
+    State.ESPData[character] = nil
+end
+
+function ESPSystem:CalculateBox(character, currentDistance)
+    local head = _FindFirstChild(character, "Head")
+    local hrp = _FindFirstChild(character, "HumanoidRootPart")
+    if not head or not hrp then return nil end
+    
+    local bottomPart = _FindFirstChild(character, "LeftFoot") or _FindFirstChild(character, "RightFoot") or
+                       _FindFirstChild(character, "Left Leg") or _FindFirstChild(character, "Right Leg") or hrp
+    
+    local headScreen, headOn = Utils.WorldToScreen(head.Position)
+    local bottomScreen, bottomOn = Utils.WorldToScreen(bottomPart.Position)
+    
+    if not headOn or not bottomOn then return nil end
+    
+    local baseHeight = math.abs(headScreen.Y - bottomScreen.Y)
+    if baseHeight <= 0 then baseHeight = 1 end
+    
+    local scale = math.max(0.1, 1 - (currentDistance * self.DistanceScaleFactor / self.MaxDistance))
+    local scaledHeight = self.BaseBoxHeight * scale
+    
+    scaledHeight = mathclamp(scaledHeight, self.MinBoxHeight, self.MaxBoxHeight)
+    
+    local width = scaledHeight * 0.45
+    
+    local centerX = (headScreen.X + bottomScreen.X)/2
+    local topY = headScreen.Y - (scaledHeight * 0.15)
+    local bottomY = topY + scaledHeight
+    
+    local leftX = centerX - width/2
+    local rightX = centerX + width/2
+    
+    local topLeft = _Vector2new(leftX, topY)
+    local bottomRight = _Vector2new(rightX, bottomY)
+    local centerPos = _Vector2new(centerX, (topY+bottomY)/2)
+    
+    return topLeft, bottomRight, centerPos
+end
+
+function ESPSystem:HideESP(data)
+    for key, value in pairs(data) do
+        if key == "Skeleton" then
+            for _, bone in ipairs(value) do
+                if bone.Line then bone.Line.Visible = false end
+            end
+        elseif key == "Chams" then
+            value.Enabled = false
+        elseif type(value) == "table" and value.__type == "Drawing" then
+            value.Visible = false
+        end
+    end
+end
+
+function ESPSystem:UpdateESP(character, data)
+    if not Utils.IsAlive(character) then
+        self:HideESP(data)
+        return
+    end
+    
+    local hrp = _FindFirstChild(character, "HumanoidRootPart")
+    if not hrp then
+        self:HideESP(data)
+        return
+    end
+    
+    local currentDistance = 0
+    if LocalPlayer.Character and _FindFirstChild(LocalPlayer.Character, "HumanoidRootPart") then
+        currentDistance = Utils.GetDistance(
+            _FindFirstChild(LocalPlayer.Character, "HumanoidRootPart").Position,
+            hrp.Position
+        )
+        if currentDistance > self.MaxDistance then
+            self:HideESP(data)
+            return
+        end
+    end
+    
+    local topLeft, bottomRight, centerPos = self:CalculateBox(character, currentDistance)
+    if not topLeft then
+        self:HideESP(data)
+        return
+    end
+    
+    local size = bottomRight - topLeft
+    
+    -- Box
+    if self.ShowBox then
+        data.Box.Position = topLeft
+        data.Box.Size = size
+        data.Box.Color = self.BoxColor
+        data.Box.Visible = true
+        
+        data.BoxOutline.Position = topLeft - _Vector2new(1, 1)
+        data.BoxOutline.Size = size + _Vector2new(2, 2)
+        data.BoxOutline.Visible = true
+    else
+        data.Box.Visible = false
+        data.BoxOutline.Visible = false
+    end
+    
+    -- Box Fill
+    if self.ShowBoxFill then
+        data.BoxFill.Position = topLeft
+        data.BoxFill.Size = size
+        data.BoxFill.Color = self.BoxFillColor
+        data.BoxFill.Transparency = self.BoxFillTransparency
+        data.BoxFill.Visible = true
+    else
+        data.BoxFill.Visible = false
+    end
+    
+    -- Skeleton
+    if self.ShowSkeleton then
+        local bonesTemplate = GetSkeletonBones(character)
+        for i, boneData in ipairs(data.Skeleton) do
+            local p1 = _FindFirstChild(character, boneData.From)
+            local p2 = _FindFirstChild(character, boneData.To)
+            if p1 and p2 then
+                local s1, on1 = Utils.WorldToScreen(p1.Position)
+                local s2, on2 = Utils.WorldToScreen(p2.Position)
+                if on1 and on2 then
+                    boneData.Line.From = s1
+                    boneData.Line.To = s2
+                    boneData.Line.Color = self.SkeletonColor
+                    boneData.Line.Visible = true
+                else
+                    boneData.Line.Visible = false
+                end
+            else
+                boneData.Line.Visible = false
+            end
+        end
+    else
+        for _, boneData in ipairs(data.Skeleton) do
+            boneData.Line.Visible = false
+        end
+    end
+    
+    -- Tracers
+    if self.ShowTracers then
+        local screenPos, onScreen = Utils.WorldToScreen(hrp.Position)
+        if onScreen then
+            local vp = Camera.ViewportSize
+            data.Tracer.From = _Vector2new(vp.X/2, vp.Y)
+            data.Tracer.To = screenPos
+            data.Tracer.Color = self.TracerColor
+            data.Tracer.Visible = true
+        else
+            data.Tracer.Visible = false
+        end
+    else
+        data.Tracer.Visible = false
+    end
+    
+    -- Chams
+    data.Chams.Enabled = self.ShowChams
+    data.Chams.FillColor = self.ChamsColor
+    data.Chams.FillTransparency = self.ChamsTransparency
+    data.Chams.OutlineColor = self.ChamsColor
+    data.Chams.OutlineTransparency = self.ChamsOutlineTransparency
+    data.Chams.DepthMode = self.ChamsVisibleOnly and Enum.HighlightDepthMode.Occluded or Enum.HighlightDepthMode.AlwaysOnTop
+end
+
+function ESPSystem:UpdateAll()
+    if not self.Enabled then
+        for _, data in pairs(State.ESPData) do
+            self:HideESP(data)
+        end
+        return
+    end
+    
+    for char, data in pairs(State.ESPData) do
+        if char and char.Parent then
+            self:UpdateESP(char, data)
+        else
+            self:RemoveESP(char)
+        end
+    end
+end
+
+-- ============================================================================
+-- WORLD ESP
+-- ============================================================================
+
+local WorldESP = {
+    Enabled = false,
+    Stone = true,
+    Iron = true,
+    Nitrate = true,
+    Machine = true,
+    BetterBox = true,
+    Safe = true,
+    Salvage = true,
+    ATV = true,
+    Helicopter = true,
+    Boat = true,
+    Car = true,
+    
+    OreColor = Color3.fromRGB(255, 165, 0),
+    VehicleColor = Color3.fromRGB(0, 255, 0),
+    StructureColor = Color3.fromRGB(255, 0, 255),
+    
+    MaxDistance = 500
+}
+
+local ObjectTypes = {
+    Stone = {Color = Color3.fromRGB(128, 128, 128), Icon = "🪨"},
+    Iron = {Color = Color3.fromRGB(150, 150, 150), Icon = "⚙️"},
+    Nitrate = {Color = Color3.fromRGB(0, 255, 0), Icon = "💎"},
+    Machine = {Color = Color3.fromRGB(255, 100, 0), Icon = "🔧"},
+    BetterBox = {Color = Color3.fromRGB(255, 215, 0), Icon = "📦"},
+    Safe = {Color = Color3.fromRGB(200, 200, 0), Icon = "🔒"},
+    Salvage = {Color = Color3.fromRGB(150, 75, 0), Icon = "♻️"},
+    ATV = {Color = Color3.fromRGB(0, 255, 0), Icon = "🏍️"},
+    Helicopter = {Color = Color3.fromRGB(0, 200, 255), Icon = "🚁"},
+    Boat = {Color = Color3.fromRGB(0, 100, 200), Icon = "⛵"},
+    Car = {Color = Color3.fromRGB(255, 0, 0), Icon = "🚗"}
+}
+
+function WorldESP:CreateObject(part, objectType)
+    if State.WorldObjects[part] then return end
+    
+    local data = {
+        Part = part,
+        Type = objectType,
+        Drawing = Utils.CreateDrawing("Text", {
+            Center = true,
+            Outline = true,
+            Size = 13,
+            Font = 2
+        })
+    }
+    
+    State.WorldObjects[part] = data
+end
+
+function WorldESP:DetectOre(part)
+    if _IsA(part, "MeshPart") and part.MeshId == "rbxassetid://12939036056" then
+        self:CreateObject(part, "Stone")
+    elseif _IsA(part, "BasePart") then
+        local color = part.Color
+        if color == Color3.fromRGB(150, 150, 150) then
+            self:CreateObject(part, "Iron")
+        elseif color == Color3.fromRGB(0, 255, 0) then
+            self:CreateObject(part, "Nitrate")
+        end
+    end
+end
+
+function WorldESP:DetectStructure(part)
+    if part.Name == "Dispenser" and _IsA(part, "BasePart") then
+        self:CreateObject(part, "Machine")
+    elseif _IsA(part, "MeshPart") then
+        if part.MeshId == "rbxassetid://13856404606" then
+            self:CreateObject(part, "BetterBox")
+        elseif part.MeshId == "rbxassetid://13895291313" then
+            self:CreateObject(part, "Safe")
+        elseif part.MeshId == "rbxassetid://18507721359" and part.Name == "default" then
+            self:CreateObject(part, "Salvage")
+        end
+    end
+end
+
+function WorldESP:DetectVehicle(model)
+    if not _IsA(model, "Model") then return end
+    
+    if _FindFirstChild(model, "Seat") and _FindFirstChild(model, "Frame") then
+        local frame = _FindFirstChild(model, "Frame")
+        if _IsA(frame, "VehicleSeat") then
+            local part = model.PrimaryPart or _FindFirstChildOfClass(model, "BasePart")
+            if part then self:CreateObject(part, "ATV") end
+        end
+    elseif _FindFirstChild(model, "RearProp") then
+        local part = model.PrimaryPart or _FindFirstChildOfClass(model, "BasePart")
+        if part then self:CreateObject(part, "Helicopter") end
+    elseif _FindFirstChild(model, "SteeringWheel") then
+        local part = model.PrimaryPart or _FindFirstChildOfClass(model, "BasePart")
+        if part then self:CreateObject(part, "Boat") end
+    elseif _FindFirstChild(model, "lights2") then
+        local part = model.PrimaryPart or _FindFirstChildOfClass(model, "BasePart")
+        if part then self:CreateObject(part, "Car") end
+    end
+end
+
+function WorldESP:ScanWorkspace()
+    for _, obj in ipairs(Services.Workspace:GetDescendants()) do
+        pcall(function()
+            if _IsA(obj, "BasePart") or _IsA(obj, "MeshPart") then
+                self:DetectOre(obj)
+                self:DetectStructure(obj)
+            elseif _IsA(obj, "Model") then
+                self:DetectVehicle(obj)
+            end
+        end)
+    end
+end
+
+function WorldESP:UpdateAll()
+    if not self.Enabled then
+        for _, data in pairs(State.WorldObjects) do
+            data.Drawing.Visible = false
+        end
+        return
+    end
+    
+    for part, data in pairs(State.WorldObjects) do
+        if not part or not part.Parent then
+            Utils.SafeDestroy(data.Drawing)
+            State.WorldObjects[part] = nil
+            continue
+        end
+        
+        local shouldShow = self[data.Type]
+        if not shouldShow then
+            data.Drawing.Visible = false
+            continue
+        end
+        
+        if LocalPlayer.Character and _FindFirstChild(LocalPlayer.Character, "HumanoidRootPart") then
+            local distance = Utils.GetDistance(
+                _FindFirstChild(LocalPlayer.Character, "HumanoidRootPart").Position,
+                part.Position
+            )
+            
+            if distance > self.MaxDistance then
+                data.Drawing.Visible = false
+                continue
+            end
+        end
+        
+        local screenPos, onScreen = Utils.WorldToScreen(part.Position)
+        if onScreen then
+            local objInfo = ObjectTypes[data.Type]
+            data.Drawing.Position = screenPos
+            data.Drawing.Text = (objInfo.Icon or "") .. " " .. data.Type
+            data.Drawing.Color = objInfo.Color
+            data.Drawing.Visible = true
+        else
+            data.Drawing.Visible = false
+        end
+    end
+end
+
+-- ============================================================================
+-- ARMOR ESP
+-- ============================================================================
+
+local ArmorESP = {
+    Enabled = false
+}
+
+local ArmorColors = {
+    Wood = Color3.fromRGB(139, 69, 19),
+    Iron = Color3.fromRGB(150, 150, 150),
+    Steel = Color3.fromRGB(200, 200, 200),
+    Riot = Color3.fromRGB(50, 50, 50),
+    Heavy = Color3.fromRGB(100, 0, 0),
+    Basic = Color3.fromRGB(255, 255, 255),
+    None = Color3.fromRGB(150, 150, 150)
+}
+
+function ArmorESP:DetectType(name)
+    name = name:lower()
+    if name:find("riot") then return "Riot"
+    elseif name:find("steel") then return "Steel"
+    elseif name:find("iron") then return "Iron"
+    elseif name:find("wood") then return "Wood"
+    elseif name:find("camo") or name:find("police") or name:find("jugger") then return "Heavy"
+    else return "Basic" end
+end
+
+function ArmorESP:GetArmorPieces(character)
+    local pieces = {
+        Head = {},
+        Torso = {},
+        Legs = {}
+    }
+    
+    for _, part in ipairs(character:GetChildren()) do
+        if _IsA(part, "BasePart") then
+            local name = part.Name:lower()
+            if name:find("helmet") or name:find("mask") or name:find("gasmask") or name:find("combat") then
+                table.insert(pieces.Head, part)
+            elseif name:find("chest") or name:find("vest") or name:find("shirt") or name:find("torso") or name:find("kevlar") then
+                table.insert(pieces.Torso, part)
+            elseif name:find("legging") or name:find("pant") or name:find("leg") then
+                table.insert(pieces.Legs, part)
+            end
+        end
+    end
+    
+    return pieces
+end
+
+function ArmorESP:CreateTag(part, armorType)
+    local billboard = Instance.new("BillboardGui")
+    billboard.Size = UDim2.new(0, 120, 0, 30)
+    billboard.StudsOffset = _Vector3new(0, 3, 0)
+    billboard.AlwaysOnTop = true
+    billboard.LightInfluence = 0
+    billboard.Adornee = part
+    billboard.Parent = ESPContainer
+    
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, 0, 1, 0)
+    label.BackgroundTransparency = 1
+    label.Text = armorType .. " Armor"
+    label.TextColor3 = ArmorColors[armorType] or ArmorColors.None
+    label.TextStrokeTransparency = 0
+    label.TextStrokeColor3 = Color3.new(0, 0, 0)
+    label.TextSize = 14
+    label.Font = Enum.Font.GothamBold
+    label.Parent = billboard
+    
+    return billboard
+end
+
+function ArmorESP:CreateTags(character)
+    local pieces = self:GetArmorPieces(character)
+    local tags = {}
+    
+    for bodyPart, parts in pairs(pieces) do
+        if #parts > 0 then
+            local armorType = self:DetectType(parts[1].Name)
+            local tag = self:CreateTag(parts[1], armorType)
+            tags[bodyPart] = tag
+        end
+    end
+    
+    State.ArmorTags[character] = tags
+end
+
+function ArmorESP:RemoveTags(character)
+    local tags = State.ArmorTags[character]
+    if tags then
+        for _, tag in pairs(tags) do
+            Utils.SafeDestroy(tag)
+        end
+        State.ArmorTags[character] = nil
+    end
+end
+
+function ArmorESP:UpdateAll()
+    if not self.Enabled then
+        for character in pairs(State.ArmorTags) do
+            self:RemoveTags(character)
+        end
+        return
+    end
+    
+    for _, player in ipairs(Services.Players:GetPlayers()) do
+        if player.Character and Utils.IsAlive(player.Character) then
+            if not State.ArmorTags[player.Character] then
+                self:CreateTags(player.Character)
+            end
+        end
+    end
+end
+
+-- ============================================================================
+-- FEATURES ADICIONAIS (INTEGRATED FROM PROVIDED CODE)
+-- ============================================================================
+
+local Features = {
+    AutoSprint = false,
+    BHop = false,
+    NoFall = false,
+    InfiniteJump = false,
+    WalkSpeed = 16,
+    JumpPower = 50,
+    Reach = 3,
+    LongNeck = false,
+    XrayBase = false,
+    LockTime = false,
+    LockedTimeValue = 12,
+    RemoveClouds = false,
+    NoFog = false,
+    Fullbright = false,
+    
+    -- Integrated from provided code
+    FakeCrouch = false,
+    FreeCamEnabled = false,
+    FreeCamSpeed = 10,
+    CarFlyEnabled = false,
+    CarFlySpeed = 150,
+    CarFlyUpSpeed = 15,
+    CarFlyAccel = 100
+}
+
+-- Auto Sprint
+task.spawn(function()
+    while true do
+        if Features.AutoSprint and LocalPlayer.Character then
+            local humanoid = _FindFirstChildOfClass(LocalPlayer.Character, "Humanoid")
+            if humanoid then
+                humanoid.WalkSpeed = Features.WalkSpeed
+            end
+        end
+        task.wait(0.1)
+    end
+end)
+
+-- BHop (PC Only, Mobile uses UI toggle if needed)
+Services.RunService.RenderStepped:Connect(function()
+    if Features.BHop and LocalPlayer.Character and not IsMobile then
+        local humanoid = _FindFirstChildOfClass(LocalPlayer.Character, "Humanoid")
+        if humanoid and _IsKeyDown(Services.UserInputService, Enum.KeyCode.Space) then
+            if humanoid:GetState() ~= Enum.HumanoidStateType.Freefall then
+                humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+            end
+        end
+    end
+end)
+
+-- No Fall Damage
+local oldFall = nil
+function Features:ToggleNoFall(enabled)
+    if enabled then
+        if LocalPlayer.Character then
+            local humanoid = _FindFirstChildOfClass(LocalPlayer.Character, "Humanoid")
+            if humanoid then
+                oldFall = humanoid.FreeFalling
+                humanoid.FreeFalling = false
+            end
+        end
+    else
+        if LocalPlayer.Character and oldFall ~= nil then
+            local humanoid = _FindFirstChildOfClass(LocalPlayer.Character, "Humanoid")
+            if humanoid then
+                humanoid.FreeFalling = oldFall
+            end
+        end
+    end
+end
+
+-- Infinite Jump
+Services.UserInputService.JumpRequest:Connect(function()
+    if Features.InfiniteJump and LocalPlayer.Character then
+        local humanoid = _FindFirstChildOfClass(LocalPlayer.Character, "Humanoid")
+        if humanoid then
+            humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+        end
+    end
+end)
+
+-- Walk Speed & Jump Power
+task.spawn(function()
+    while true do
+        if LocalPlayer.Character then
+            local humanoid = _FindFirstChildOfClass(LocalPlayer.Character, "Humanoid")
+            if humanoid then
+                if Features.WalkSpeed ~= 16 then
+                    humanoid.WalkSpeed = Features.WalkSpeed
+                end
+                if Features.JumpPower ~= 50 then
+                    humanoid.JumpPower = Features.JumpPower
+                end
+            end
+        end
+        task.wait(0.5)
+    end
+end)
+
+-- Long Neck (PC: Ctrl) / Mobile: toggle
+local originalPrismCFrame = nil
+local function ToggleLongNeckState(enable)
+    pcall(function()
+        local top = trident.middlepart and _FindFirstChild(trident.middlepart.Parent, "Top")
+        if top and _FindFirstChild(top, "Prism1") then
+            local prism1 = _FindFirstChild(top, "Prism1")
+            if not originalPrismCFrame then
+                originalPrismCFrame = prism1.CFrame
+            end
+            prism1.CFrame = enable and originalPrismCFrame - _Vector3new(0, 5, 0) or originalPrismCFrame
+        end
+    end)
+end
+
+-- Para PC, ainda mantemos o bind de Ctrl
+if not IsMobile then
+    Services.UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        if input.KeyCode == Enum.KeyCode.LeftControl and Features.LongNeck then
+            ToggleLongNeckState(true)
+        end
+    end)
+    Services.UserInputService.InputEnded:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        if input.KeyCode == Enum.KeyCode.LeftControl and Features.LongNeck then
+            ToggleLongNeckState(false)
+        end
+    end)
+end
+
+-- Fake Crouch (from provided code)
+local fakeCrouchTimer = tick()
+Services.RunService.Heartbeat:Connect(function()
+    if Features.FakeCrouch and trident.tcp and trident.loaded then
+        if tick() - fakeCrouchTimer >= 0.15 then
+            pcall(function() trident.tcp:FireServer(2, true) end)
+            fakeCrouchTimer = tick()
+        end
+    end
+end)
+
+-- Freecam (from provided code)
+local freeCamOffset = _Vector3new(0,0,0)
+local originalMiddleCFrame = nil
+Services.RunService.Heartbeat:Connect(function(delta)
+    if not trident.middlepart then return end
+
+    if Features.FreeCamEnabled then
+        if not originalMiddleCFrame then
+            originalMiddleCFrame = trident.middlepart.CFrame
+        end
+        trident.middlepart.CanCollide = false
+        _FindFirstChild(trident.middlepart.Parent, "Bottom").CanCollide = false
+        _FindFirstChild(trident.middlepart.Parent, "Top").CanCollide = false
+
+        local cameralook = Camera.CFrame.LookVector
+        local direction = _Vector3new(0,0,0)
+        direction = _IsKeyDown(Services.UserInputService, Enum.KeyCode.W) and direction + cameralook or direction;
+        direction = _IsKeyDown(Services.UserInputService, Enum.KeyCode.S) and direction - cameralook or direction;
+        direction = _IsKeyDown(Services.UserInputService, Enum.KeyCode.D) and direction + _Vector3new(- cameralook.Z, 0, cameralook.X) or direction;
+        direction = _IsKeyDown(Services.UserInputService, Enum.KeyCode.A) and direction + _Vector3new(cameralook.Z, 0, - cameralook.X) or direction;
+        
+        if not direction == _Vector3new(0,0,0) then
+            direction = direction.Unit
+        end
+        freeCamOffset = freeCamOffset + (direction * delta * Features.FreeCamSpeed)
+        trident.middlepart.CFrame = originalMiddleCFrame + freeCamOffset
+        trident.middlepart.AssemblyLinearVelocity = _Vector3new(0,0,0)
+    else
+        if originalMiddleCFrame then
+            trident.middlepart.CanCollide = true
+            _FindFirstChild(trident.middlepart.Parent, "Bottom").CanCollide = true
+            _FindFirstChild(trident.middlepart.Parent, "Top").CanCollide = true
+            originalMiddleCFrame = nil -- Reset for next activation
+        end
+        freeCamOffset = _Vector3new(0,0,0)
+    end
+end)
+
+-- Car Fly (from provided code)
+local currentCar = nil
+local carFlyBuildup = 0
+local lastCarFlyDir = _Vector3new(1,0,0)
+
+local function FindClosestCar()
+    local closestCar, minDist = nil, math.huge
+    for _, v in pairs(Services.Workspace:GetChildren()) do
+        if _FindFirstChild(v, "Seat") and _FindFirstChild(v, "Frame") then
+            local frame = _FindFirstChild(v, "Frame")
+            if frame and trident.middlepart then
+                local dist = (frame.Position - trident.middlepart.Position).Magnitude
+                if dist < minDist then
+                    closestCar = v
+                    minDist = dist
+                end
+            end
+        end
+    end
+    return closestCar, minDist
+end
+
+Services.RunService.RenderStepped:Connect(function(delta)
+    if Features.CarFlyEnabled and trident.loaded then
+        if not currentCar or not _FindFirstChild(currentCar, "Frame") or (_FindFirstChild(currentCar, "Frame").CFrame.p - Camera.CFrame.p).Magnitude > 50 then
+            currentCar, _ = FindClosestCar()
+            carFlyBuildup = 0
+        end
+
+        if currentCar and _FindFirstChild(currentCar, "Frame") then
+            local cameralook = Camera.CFrame.LookVector
+            cameralook = _Vector3new(cameralook.X, 0, cameralook.Z)
+            local direction = _Vector3new(0,0,0)
+            
+            direction = _IsKeyDown(Services.UserInputService, Enum.KeyCode.W) and direction + cameralook or direction;
+            direction = _IsKeyDown(Services.UserInputService, Enum.KeyCode.S) and direction - cameralook or direction;
+            direction = _IsKeyDown(Services.UserInputService, Enum.KeyCode.D) and direction + _Vector3new(- cameralook.Z, 0, cameralook.X) or direction;
+            direction = _IsKeyDown(Services.UserInputService, Enum.KeyCode.A) and direction + _Vector3new(cameralook.Z, 0, - cameralook.X) or direction;
+            direction = _IsKeyDown(Services.UserInputService, Enum.KeyCode.V) and direction + _Vector3new(0, 1, 0) or direction;
+            direction = _IsKeyDown(Services.UserInputService, Enum.KeyCode.B) and direction - _Vector3new(0, 1, 0) or direction;
+
+            if direction ~= _Vector3new(0,0,0) then
+                direction = direction.Unit
+                if direction ~= _Vector3new(0,1,0) and direction ~= _Vector3new(0,-1,0) then -- Only horizontal movement affects buildup
+                    carFlyBuildup = mathclamp(carFlyBuildup + delta * Features.CarFlyAccel, 0, Features.CarFlySpeed)
+                    lastCarFlyDir = direction
+                end
+            else
+                direction = lastCarFlyDir
+                carFlyBuildup = mathclamp(carFlyBuildup - delta * 150, 0, Features.CarFlySpeed)
+            end
+
+            for _, v in pairs(currentCar:GetChildren()) do
+                if _IsA(v, "BasePart") then
+                    v.AssemblyLinearVelocity = _Vector3new(direction.X * carFlyBuildup, direction.Y * Features.CarFlyUpSpeed, direction.Z * carFlyBuildup)
+                end
+            end
+        else
+            carFlyBuildup = 0
+        end
+    else
+        carFlyBuildup = 0
+    end
+end)
+
+-- Xray Base
+function Features:UpdateXray()
+    if self.XrayBase then
+        for _, obj in ipairs(Services.Workspace:GetDescendants()) do
+            pcall(function()
+                if _IsA(obj, "BasePart") and (obj.Name == "Wall" or obj.Name == "Foundation") then
+                    obj.Transparency = 0.7
+                    obj.CanCollide = false
+                end
+            end)
+        end
+    end
+end
+
+-- Lock Time
+Services.RunService.RenderStepped:Connect(function()
+    if Features.LockTime then
+        Services.Lighting.ClockTime = Features.LockedTimeValue
+    end
+end)
+
+-- Clouds
+function Features:UpdateClouds()
+    pcall(function()
+        local sky = _FindFirstChildOfClass(Services.Lighting, "Sky")
+        if sky and _FindFirstChild(sky, "CloudsEnabled") ~= nil then
+            sky.CloudsEnabled = not self.RemoveClouds
+        end
+    end)
+end
+
+-- No Fog
+function Features:UpdateFog()
+    if self.NoFog then
+        Services.Lighting.FogEnd = 9e9
+        Services.Lighting.GlobalShadows = false
+    else
+        Services.Lighting.FogEnd = 100000
+        Services.Lighting.GlobalShadows = true
+    end
+end
+
+-- Fullbright
+function Features:UpdateFullbright()
+    if self.Fullbright then
+        Services.Lighting.Brightness = 2
+        Services.Lighting.Ambient = Color3.new(1, 1, 1)
+        Services.Lighting.OutdoorAmbient = Color3.new(1, 1, 1)
+    else
+        Services.Lighting.Brightness = 1
+        Services.Lighting.Ambient = Color3.new(0.5, 0.5, 0.5)
+        Services.Lighting.OutdoorAmbient = Color3.new(0.5, 0.5, 0.5)
+    end
+end
+
+-- ============================================================================
+-- PLAYER SETUP
+-- ============================================================================
+
+local function SetupPlayer(player)
+    if player == LocalPlayer then return end
+    
+    local function onCharacterAdded(character)
+        task.wait(0.5)
+        pcall(function()
+            ESPSystem:CreateESP(character)
+            PlayerTags3D:CreateTagGUI(character)
+            if ArmorESP and ArmorESP.Enabled then
+                ArmorESP:CreateTags(character)
+            end
+            if HitboxSystem.Enabled then
+                HitboxSystem:ApplyToPlayer(player)
+            end
+        end)
+    end
+    
+    if player.Character then
+        onCharacterAdded(player.Character)
+    end
+    
+    player.CharacterAdded:Connect(onCharacterAdded)
+    player.CharacterRemoving:Connect(function(character)
+        pcall(function()
+            ESPSystem:RemoveESP(character)
+            PlayerTags3D:RemoveTagGUI(character)
+            if ArmorESP then
+                ArmorESP:RemoveTags(character)
+            end
+        end)
+    end)
+end
+
+for _, plr in ipairs(Services.Players:GetPlayers()) do
+    SetupPlayer(plr)
+end
+Services.Players.PlayerAdded:Connect(SetupPlayer)
+
+-- ============================================================================
+-- MAIN LOOPS
+-- ============================================================================
+
+Services.RunService.RenderStepped:Connect(function()
+    pcall(function()
+        AimSystem:Update()
+        ESPSystem:UpdateAll()
+        PlayerTags3D:UpdateAll()
+        if ArmorESP then ArmorESP:UpdateAll() end
+        if WorldESP then WorldESP:UpdateAll() end
+        HitboxSystem:UpdateAll()
+    end)
+end)
+
+-- ============================================================================
+-- UI RAYFIELD
+-- ============================================================================
+
+-- Tab Principal
+local MainTab = Window:CreateTab("🎯 Combat", 4483362458)
+
+MainTab:CreateSection("Magic Bullet / Aimbot")
+
+MainTab:CreateToggle({
+    Name = "Ativar Magic Bullet / Aimbot",
+    CurrentValue = false,
+    Callback = function(value)
+        AimSystem.Enabled = value
+        Rayfield:Notify({
+            Title = "Aimbot",
+            Content = value and "Aimbot Ativado" or "Aimbot Desativado",
+            Duration = 2
+        })
+    end
+})
+
+MainTab:CreateToggle({
+    Name = "Mostrar FOV Circle",
+    CurrentValue = false,
+    Callback = function(value)
+        AimSystem.ShowFOV = value
+    end
+})
+
+MainTab:CreateToggle({
+    Name = "Mostrar Snap Line",
+    CurrentValue = false,
+    Callback = function(value)
+        AimSystem.ShowSnapline = value
+    end
+})
+
+MainTab:CreateToggle({
+    Name = "Ignorar Jogadores Dormindo",
+    CurrentValue = true,
+    Callback = function(value)
+        AimSystem.CheckSleep = value
+    end
+})
+
+MainTab:CreateSlider({
+    Name = "Tamanho do FOV",
+    Range = {0, 500},
+    Increment = 5,
+    CurrentValue = 120,
+    Callback = function(value)
+        AimSystem.FOVSize = value
+    end
+})
+
+MainTab:CreateColorPicker({
+    Name = "Cor do FOV",
+    Color = Color3.fromRGB(255, 0, 0),
+    Callback = function(color)
+        AimSystem.FOVColor = color
+    end
+})
+
+MainTab:CreateSection("Hitbox Expansion (RITBOX)")
+
+MainTab:CreateToggle({
+    Name = "Expandir Hitbox da Cabeça",
+    CurrentValue = false,
+    Callback = function(value)
+        HitboxSystem.Enabled = value
+        HitboxSystem.HeadEnabled = value
+        HitboxSystem:UpdateAll()
+    end
+})
+
+MainTab:CreateToggle({
+    Name = "Expandir Hitbox do Torso",
+    CurrentValue = false,
+    Callback = function(value)
+        HitboxSystem.TorsoEnabled = value
+        if HitboxSystem.Enabled then
+            HitboxSystem:UpdateAll()
+        end
+    end
+})
+
+MainTab:CreateSlider({
+    Name = "Tamanho da Hitbox (X/Z)",
+    Range = {1, 10},
+    Increment = 0.5,
+    CurrentValue = 3,
+    Callback = function(value)
+        HitboxSystem.HeadSize = _Vector3new(value, value + 1, value)
+        HitboxSystem.TorsoSize = _Vector3new(value + 1, value + 1, value + 1)
+        if HitboxSystem.Enabled then
+            HitboxSystem:UpdateAll()
+        end
+    end
+})
+
+MainTab:CreateSlider({
+    Name = "Transparência da Hitbox",
+    Range = {0, 1},
+    Increment = 0.1,
+    CurrentValue = 0.5,
+    Callback = function(value)
+        HitboxSystem.Transparency = value
+        if HitboxSystem.Enabled then
+            HitboxSystem:UpdateAll()
+        end
+    end
+})
+
+-- Tab de Players
+local PlayersTab = Window:CreateTab("👥 Players", 4483362458)
+
+PlayersTab:CreateSection("Player ESP (Visual)")
+
+PlayersTab:CreateToggle({
+    Name = "Ativar ESP Box",
+    CurrentValue = true,
+    Callback = function(value)
+        ESPSystem.Enabled = value
+    end
+})
+
+PlayersTab:CreateToggle({
+    Name = "Box Outline",
+    CurrentValue = true,
+    Callback = function(value)
+        ESPSystem.ShowBox = value
+    end
+})
+
+PlayersTab:CreateToggle({
+    Name = "Box Fill",
+    CurrentValue = true,
+    Callback = function(value)
+        ESPSystem.ShowBoxFill = value
+    end
+})
+
+PlayersTab:CreateToggle({
+    Name = "Chams (Highlight)",
+    CurrentValue = true,
+    Callback = function(value)
+        ESPSystem.ShowChams = value
+    end
+})
+
+PlayersTab:CreateToggle({
+    Name = "Chams Visível Apenas",
+    CurrentValue = false,
+    Callback = function(value)
+        ESPSystem.ChamsVisibleOnly = value
+    end
+})
+
+PlayersTab:CreateToggle({
+    Name = "Skeleton ESP",
+    CurrentValue = false,
+    Callback = function(value)
+        ESPSystem.ShowSkeleton = value
+    end
+})
+
+PlayersTab:CreateToggle({
+    Name = "Tracers",
+    CurrentValue = true,
+    Callback = function(value)
+        ESPSystem.ShowTracers = value
+    end
+})
+
+PlayersTab:CreateSection("Player Info Tags (3D)")
+
+PlayersTab:CreateToggle({
+    Name = "Ativar Tags 3D",
+    CurrentValue = true,
+    Callback = function(value)
+        PlayerTags3D.Enabled = value
+    end
+})
+
+PlayersTab:CreateToggle({
+    Name = "Nome do Jogador (3D)",
+    CurrentValue = true,
+    Callback = function(value)
+        PlayerTags3D.ShowName = value
+    end
+})
+
+PlayersTab:CreateToggle({
+    Name = "Distância (3D)",
+    CurrentValue = true,
+    Callback = function(value)
+        PlayerTags3D.ShowDistance = value
+    end
+})
+
+PlayersTab:CreateToggle({
+    Name = "Arma Equipada (3D)",
+    CurrentValue = true,
+    Callback = function(value)
+        PlayerTags3D.ShowWeapon = value
+    end
+})
+
+PlayersTab:CreateToggle({
+    Name = "Health % (3D)",
+    CurrentValue = true,
+    Callback = function(value)
+        PlayerTags3D.ShowHealth = value
+    end
+})
+
+PlayersTab:CreateToggle({
+    Name = "Armor ESP (3D)",
+    CurrentValue = false,
+    Callback = function(value)
+        ArmorESP.Enabled = value
+    end
+})
+
+PlayersTab:CreateSection("Cores do ESP")
+
+PlayersTab:CreateColorPicker({
+    Name = "Cor do Box",
+    Color = Color3.fromRGB(255, 0, 0),
+    Callback = function(color)
+        ESPSystem.BoxColor = color
+    end
+})
+
+PlayersTab:CreateColorPicker({
+    Name = "Cor do Chams",
+    Color = Color3.fromRGB(0, 100, 255),
+    Callback = function(color)
+        ESPSystem.ChamsColor = color
+    end
+})
+
+PlayersTab:CreateColorPicker({
+    Name = "Cor do Skeleton",
+    Color = Color3.fromRGB(0, 255, 255),
+    Callback = function(color)
+        ESPSystem.SkeletonColor = color
+    end
+})
+
+PlayersTab:CreateColorPicker({
+    Name = "Cor dos Tracers",
+    Color = Color3.fromRGB(255, 0, 255),
+    Callback = function(color)
+        ESPSystem.TracerColor = color
+    end
+})
+
+PlayersTab:CreateSlider({
+    Name = "Distância Máxima ESP",
+    Range = {100, 2000},
+    Increment = 50,
+    CurrentValue = 1500,
+    Callback = function(value)
+        ESPSystem.MaxDistance = value
+        PlayerTags3D.MaxDistance = value -- Sincroniza com tags 3D
+    end
+})
+
+PlayersTab:CreateSlider({
+    Name = "Altura Mínima Box (px)",
+    Range = {20, 100},
+    Increment = 5,
+    CurrentValue = 40,
+    Callback = function(value)
+        ESPSystem.MinBoxHeight = value
+    end
+})
+
+PlayersTab:CreateSlider({
+    Name = "Altura Máxima Box (px)",
+    Range = {100, 500},
+    Increment = 10,
+    CurrentValue = 280,
+    Callback = function(value)
+        ESPSystem.MaxBoxHeight = value
+    end
+})
+
+PlayersTab:CreateSlider({
+    Name = "Escala Distância Box",
+    Range = {0.01, 0.1},
+    Increment = 0.005,
+    CurrentValue = 0.05,
+    Callback = function(value)
+        ESPSystem.DistanceScaleFactor = value
+    end
+})
+
+-- Tab World
+local WorldTab = Window:CreateTab("🌍 World", 4483362458)
+
+WorldTab:CreateSection("World ESP")
+
+WorldTab:CreateToggle({
+    Name = "Ativar World ESP",
+    CurrentValue = false,
+    Callback = function(value)
+        WorldESP.Enabled = value
+        if value then
+            WorldESP:ScanWorkspace()
+        end
+    end
+})
+
+WorldTab:CreateSection("Recursos")
+
+WorldTab:CreateToggle({
+    Name = "Stone (Pedra)",
+    CurrentValue = true,
+    Callback = function(value)
+        WorldESP.Stone = value
+    end
+})
+
+WorldTab:CreateToggle({
+    Name = "Iron (Ferro)",
+    CurrentValue = true,
+    Callback = function(value)
+        WorldESP.Iron = value
+    end
+})
+
+WorldTab:CreateToggle({
+    Name = "Nitrate (Nitrato)",
+    CurrentValue = true,
+    Callback = function(value)
+        WorldESP.Nitrate = value
+    end
+})
+
+WorldTab:CreateSection("Estruturas")
+
+WorldTab:CreateToggle({
+    Name = "Machines (Máquinas)",
+    CurrentValue = true,
+    Callback = function(value)
+        WorldESP.Machine = value
+    end
+})
+
+WorldTab:CreateToggle({
+    Name = "Better Box",
+    CurrentValue = true,
+    Callback = function(value)
+        WorldESP.BetterBox = value
+    end
+})
+
+WorldTab:CreateToggle({
+    Name = "Safe (Cofre)",
+    CurrentValue = true,
+    Callback = function(value)
+        WorldESP.Safe = value
+    end
+})
+
+WorldTab:CreateToggle({
+    Name = "Salvage",
+    CurrentValue = true,
+    Callback = function(value)
+        WorldESP.Salvage = value
+    end
+})
+
+WorldTab:CreateSection("Veículos")
+
+WorldTab:CreateToggle({
+    Name = "ATV",
+    CurrentValue = true,
+    Callback = function(value)
+        WorldESP.ATV = value
+    end
+})
+
+WorldTab:CreateToggle({
+    Name = "Helicopter (Helicóptero)",
+    CurrentValue = true,
+    Callback = function(value)
+        WorldESP.Helicopter = value
+    end
+})
+
+WorldTab:CreateToggle({
+    Name = "Boat (Barco)",
+    CurrentValue = true,
+    Callback = function(value)
+        WorldESP.Boat = value
+    end
+})
+
+WorldTab:CreateToggle({
+    Name = "Car (Carro)",
+    CurrentValue = true,
+    Callback = function(value)
+        WorldESP.Car = value
+    end
+})
+
+WorldTab:CreateSlider({
+    Name = "Distância Máxima World ESP",
+    Range = {100, 1000},
+    Increment = 50,
+    CurrentValue = 500,
+    Callback = function(value)
+        WorldESP.MaxDistance = value
+    end
+})
+
+WorldTab:CreateSection("Visuais de Base")
+
+WorldTab:CreateToggle({
+    Name = "Xray Base",
+    CurrentValue = false,
+    Callback = function(value)
+        Features.XrayBase = value
+        Features:UpdateXray()
+    end
+})
+
+-- Tab Movement
+local MovementTab = Window:CreateTab("🏃 Movement", 4483362458)
+
+MovementTab:CreateSection("Movimento")
+
+MovementTab:CreateToggle({
+    Name = "Auto Sprint",
+    CurrentValue = false,
+    Callback = function(value)
+        Features.AutoSprint = value
+    end
+})
+
+MovementTab:CreateToggle({
+    Name = "Bunny Hop (BHop)",
+    CurrentValue = false,
+    Callback = function(value)
+        Features.BHop = value
+    end
+})
+
+MovementTab:CreateToggle({
+    Name = "Infinite Jump",
+    CurrentValue = false,
+    Callback = function(value)
+        Features.InfiniteJump = value
+    end
+})
+
+MovementTab:CreateToggle({
+    Name = "No Fall Damage",
+    CurrentValue = false,
+    Callback = function(value)
+        Features.NoFall = value
+        Features:ToggleNoFall(value)
+    end
+})
+
+MovementTab:CreateSlider({
+    Name = "Walk Speed",
+    Range = {16, 150},
+    Increment = 1,
+    CurrentValue = 16,
+    Callback = function(value)
+        Features.WalkSpeed = value
+    end
+})
+
+MovementTab:CreateSlider({
+    Name = "Jump Power",
+    Range = {50, 200},
+    Increment = 5,
+    CurrentValue = 50,
+    Callback = function(value)
+        Features.JumpPower = value
+    end
+})
+
+MovementTab:CreateSection("Exploits (PC/Mobile)")
+
+MovementTab:CreateToggle({
+    Name = "Fake Crouch",
+    CurrentValue = false,
+    Callback = function(value)
+        Features.FakeCrouch = value
+    end
+})
+
+MovementTab:CreateToggle({
+    Name = "Long Neck",
+    CurrentValue = false,
+    Callback = function(value)
+        Features.LongNeck = value
+        if IsMobile then
+            ToggleLongNeckState(value)
+        end
+    end
+})
+
+MovementTab:CreateToggle({
+    Name = "Freecam",
+    CurrentValue = false,
+    Callback = function(value)
+        Features.FreeCamEnabled = value
+    end
+})
+
+MovementTab:CreateSlider({
+    Name = "Freecam Speed",
+    Range = {1, 300},
+    Increment = 1,
+    CurrentValue = 10,
+    Callback = function(value)
+        Features.FreeCamSpeed = value
+    end
+})
+
+MovementTab:CreateSection("Vehicle Exploits")
+
+MovementTab:CreateToggle({
+    Name = "Car Fly",
+    CurrentValue = false,
+    Callback = function(value)
+        Features.CarFlyEnabled = value
+    end
+})
+
+MovementTab:CreateSlider({
+    Name = "Car Fly Speed",
+    Range = {50, 300},
+    Increment = 1,
+    CurrentValue = 150,
+    Callback = function(value)
+        Features.CarFlySpeed = value
+    end
+})
+
+MovementTab:CreateSlider({
+    Name = "Car Fly Up Speed",
+    Range = {5, 100},
+    Increment = 1,
+    CurrentValue = 15,
+    Callback = function(value)
+        Features.CarFlyUpSpeed = value
+    end
+})
+
+MovementTab:CreateSlider({
+    Name = "Car Fly Acceleration",
+    Range = {10, 300},
+    Increment = 1,
+    CurrentValue = 100,
+    Callback = function(value)
+        Features.CarFlyAccel = value
+    end
+})
+
+-- Tab Visuals
+local VisualsTab = Window:CreateTab("✨ Visuals", 4483362458)
+
+VisualsTab:CreateSection("Iluminação")
+
+VisualsTab:CreateToggle({
+    Name = "Lock Time (Travar Hora)",
+    CurrentValue = false,
+    Callback = function(value)
+        Features.LockTime = value
+    end
+})
+
+VisualsTab:CreateSlider({
+    Name = "Hora do Dia",
+    Range = {0, 24},
+    Increment = 0.5,
+    CurrentValue = 12,
+    Callback = function(value)
+        Features.LockedTimeValue = value
+    end
+})
+
+VisualsTab:CreateToggle({
+    Name = "Fullbright",
+    CurrentValue = false,
+    Callback = function(value)
+        Features.Fullbright = value
+        Features:UpdateFullbright()
+    end
+})
+
+VisualsTab:CreateToggle({
+    Name = "No Fog + No Shadows",
+    CurrentValue = false,
+    Callback = function(value)
+        Features.NoFog = value
+        Features:UpdateFog()
+    end
+})
+
+VisualsTab:CreateToggle({
+    Name = "Remove Clouds (Remover Nuvens)",
+    CurrentValue = false,
+    Callback = function(value)
+        Features.RemoveClouds = value
+        Features:UpdateClouds()
+    end
+})
+
+-- Tab Misc
+local MiscTab = Window:CreateTab("⚙️ Misc", 4483362458)
+
+MiscTab:CreateSection("Recursos Extras")
+
+MiscTab:CreateButton({
+    Name = "Re-scan World ESP",
+    Callback = function()
+        WorldESP:ScanWorkspace()
+        Rayfield:Notify({
+            Title = "World ESP",
+            Content = "Workspace re-escaneado com sucesso!",
+            Duration = 3
+        })
+    end
+})
+
+MiscTab:CreateButton({
+    Name = "Reset All Settings",
+    Callback = function()
+        AimSystem.Enabled = false
+        ESPSystem.Enabled = false
+        WorldESP.Enabled = false
+        HitboxSystem.Enabled = false
+        PlayerTags3D.Enabled = false
+        HitboxSystem:Reset()
+        
+        Rayfield:Notify({
+            Title = "Reset",
+            Content = "Todas as configurações foram resetadas!",
+            Duration = 3
+        })
+    end
+})
+
+MiscTab:CreateSection("Informações")
+
+MiscTab:CreateLabel("HEX V2 - Advanced Edition (Mobile Ready)")
+MiscTab:CreateLabel("Criado por: davejahar")
+MiscTab:CreateLabel("Adaptado para mobile")
+
+-- ============================================================================
+-- INIT
+-- ============================================================================
+
+AimSystem:Initialize()
+if WorldESP and WorldESP.ScanWorkspace then
+    WorldESP:ScanWorkspace()
+    Services.Workspace.DescendantAdded:Connect(function(obj)
+        task.wait()
+        pcall(function()
+            if _IsA(obj, "BasePart") or _IsA(obj, "MeshPart") then
+                WorldESP:DetectOre(obj)
+                WorldESP:DetectStructure(obj)
+            elseif _IsA(obj, "Model") then
+                WorldESP:DetectVehicle(obj)
+            end
+        end)
+    end)
+end
+
+Rayfield:Notify({
+    Title = "HEX V2 Loaded!",
+    Content = "ESP, Aimbot & Mobile Controls ativos.",
+    Duration = 5
+})
+
+warn("[HEX V2] Advanced Edition (Mobile Ready) carregado com sucesso!")
